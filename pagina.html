@@ -1,0 +1,633 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Texto a voz</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --border: #dcdcd6;
+    --accent: #2f6f5e; --accent-text: #ffffff; --error: #b3261e; --chip: #ecece7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #171716; --panel: #212120; --text: #ececea; --muted: #a3a39d; --border: #3a3a37;
+            --accent: #5fb39b; --accent-text: #0e1a16; --error: #f2b8b5; --chip: #2c2c2a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 820px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1.05rem; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  label { display: block; font-weight: 600; font-size: .9rem; margin: 0 0 6px; }
+  textarea, select, input[type=password], input[type=text] {
+    width: 100%; font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  textarea { min-height: 180px; resize: vertical; }
+  textarea.small { min-height: 70px; }
+  textarea.dic { min-height: 140px; font-family: ui-monospace, monospace; font-size: .9rem; }
+  .bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 6px; flex-wrap: wrap; }
+  .count, .hint { color: var(--muted); font-size: .85rem; }
+  .hint { margin-top: 6px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  @media (max-width: 640px) { .grid, .grid2 { grid-template-columns: 1fr; } }
+  .mt { margin-top: 16px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 8px; padding: 12px 20px;
+           background: var(--accent); color: var(--accent-text); cursor: pointer; }
+  button.ghost { background: var(--chip); color: var(--text); padding: 6px 12px; font-weight: 500; font-size: .9rem; }
+  button:disabled { opacity: .55; cursor: progress; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .actions { display: flex; gap: 12px; align-items: center; margin-top: 20px; flex-wrap: wrap; }
+  .status { color: var(--muted); }
+  .status.error { color: var(--error); }
+  .result { margin-top: 20px; display: none; }
+  .result.show { display: block; }
+  audio { width: 100%; margin-bottom: 8px; }
+  a.download { color: var(--accent); font-weight: 600; }
+  .check { display: flex; align-items: center; gap: 8px; font-weight: 500; margin: 0; }
+  .check input { width: 18px; height: 18px; accent-color: var(--accent); }
+  details > summary { cursor: pointer; font-weight: 600; }
+  details[open] > summary { margin-bottom: 12px; }
+  .engine { display: none; }
+  .engine.show { display: block; }
+  .hist { list-style: none; padding: 0; margin: 0; }
+  .hist li { border-top: 1px solid var(--border); padding: 12px 0; }
+  .hist li:first-child { border-top: 0; padding-top: 0; }
+  .hist .meta { color: var(--muted); font-size: .85rem; }
+  .hist .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hist .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .hist audio { flex: 1; min-width: 220px; margin: 6px 0 0; height: 36px; }
+  .linkbtn { background: none; border: 0; padding: 0; color: var(--muted); font-weight: 500; font-size: .85rem; text-decoration: underline; }
+  code { font-size: .9em; }
+  .pasos { margin: 0 0 16px; padding-left: 20px; }
+  .pasos li { margin-bottom: 4px; }
+  .sugerido { margin: 8px 0 0; padding: 12px 16px; border-left: 3px solid var(--accent); background: var(--bg);
+              border-radius: 0 8px 8px 0; font-size: 1.05rem; line-height: 1.6; }
+  input[type=file] { width: 100%; font: inherit; color: var(--text); }
+  .progreso { margin-top: 16px; }
+  .pbar { height: 10px; background: var(--chip); border-radius: 999px; overflow: hidden; }
+  .pfill { height: 100%; width: 0; background: var(--accent); border-radius: 999px; transition: width .4s ease; }
+  .count.error { color: var(--error); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Texto a voz</h1>
+  <p class="sub">Escribe un texto, elige la voz y descarga el audio. Todo se genera en este servidor.</p>
+
+  <section class="panel">
+    <label for="texto">Texto</label>
+    <textarea id="texto" placeholder="Escribe o pega aquí el texto que quieres convertir en audio…"></textarea>
+    <div class="bar">
+      <span class="hint" style="margin:0">Escribe <code>[pausa 2s]</code> para insertar un silencio.</span>
+      <span>
+        <button class="ghost" id="insPausa" type="button">+ Insertar pausa</button>
+        <span class="count" id="count">0 caracteres</span>
+      </span>
+    </div>
+
+    <div class="grid mt">
+      <div>
+        <label for="voz">Voz</label>
+        <select id="voz"></select>
+        <div class="hint" id="vozHint"></div>
+      </div>
+      <div>
+        <label for="velocidad">Velocidad: <span id="velVal">1.0×</span></label>
+        <input type="range" id="velocidad" min="0.5" max="2" step="0.1" value="1">
+        <div class="hint" id="velHint"></div>
+      </div>
+      <div>
+        <label for="volumen">Volumen: <span id="volVal">100 %</span></label>
+        <input type="range" id="volumen" min="0.1" max="3" step="0.1" value="1">
+      </div>
+    </div>
+
+    <div class="grid mt">
+      <div>
+        <label for="formato">Formato</label>
+        <select id="formato">
+          <option value="mp3">MP3</option>
+          <option value="wav">WAV</option>
+          <option value="flac">FLAC</option>
+        </select>
+      </div>
+      <div>
+        <label for="pParrafo">Pausa entre párrafos: <span id="pParrafoVal"></span></label>
+        <input type="range" id="pParrafo" min="0" max="3" step="0.1" value="0.7">
+      </div>
+      <div style="align-self:end">
+        <label class="check"><input type="checkbox" id="usarDic" checked> Aplicar diccionario de pronunciación</label>
+      </div>
+    </div>
+
+    <!-- Ajustes por motor -->
+    <div class="engine mt" id="cfg-kokoro">
+      <h2>Ajustes de Kokoro</h2>
+      <div class="grid2">
+        <div>
+          <label for="pOracion">Pausa entre oraciones: <span id="pOracionVal"></span></label>
+          <input type="range" id="pOracion" min="0" max="3" step="0.05" value="0.25">
+          <div class="hint">Después de . ! ?</div>
+        </div>
+        <div>
+          <label for="pFrase">Pausa entre frases: <span id="pFraseVal"></span></label>
+          <input type="range" id="pFrase" min="0" max="2" step="0.05" value="0.1">
+          <div class="hint">Después de , ; :</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="engine mt" id="cfg-piper">
+      <h2>Ajustes de Piper</h2>
+      <div class="grid2">
+        <div>
+          <label for="expresividad">Expresividad: <span id="expresividadVal"></span></label>
+          <input type="range" id="expresividad" min="0" max="1.5" step="0.05" value="0.667">
+          <div class="hint">Menos = más monótona; más = más variada (si se exagera, distorsiona).</div>
+        </div>
+        <div>
+          <label for="ritmo">Variación del ritmo: <span id="ritmoVal"></span></label>
+          <input type="range" id="ritmo" min="0" max="1.5" step="0.05" value="0.8">
+          <div class="hint">Menos = cadencia regular; más = más natural e irregular.</div>
+        </div>
+      </div>
+      <button class="ghost mt" type="button" id="resetPiper">Restablecer valores de la voz</button>
+    </div>
+
+    <div class="engine mt" id="cfg-qwen">
+      <h2>Ajustes de Qwen3-TTS</h2>
+      <div id="estiloBox">
+        <label for="estilo">Estilo (instrucción en lenguaje natural)</label>
+        <textarea class="small" id="estilo" placeholder="Ej.: Habla con tono alegre y entusiasta."></textarea>
+        <div class="chips" id="chips"></div>
+      </div>
+      <div class="grid2 mt">
+        <div>
+          <label for="idioma">Idioma del texto</label>
+          <select id="idioma">
+            <option value="es">Español</option><option value="en">Inglés</option><option value="pt">Portugués</option>
+            <option value="fr">Francés</option><option value="it">Italiano</option><option value="de">Alemán</option>
+            <option value="ja">Japonés</option><option value="ko">Coreano</option><option value="zh">Chino</option>
+            <option value="ru">Ruso</option>
+          </select>
+        </div>
+        <div>
+          <label for="variacion">Variación: <span id="variacionVal"></span></label>
+          <input type="range" id="variacion" min="0.1" max="1.5" step="0.05" value="0.9">
+          <div class="hint">Menos = más estable y predecible; más = más expresiva, pero puede fallar.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="generar">Generar audio</button>
+      <button class="ghost" id="cancelar" type="button" style="display:none">Cancelar</button>
+      <span class="status" id="status" role="status"></span>
+    </div>
+    <div class="progreso" id="progreso" hidden>
+      <div class="pbar"><div class="pfill" id="pfill"></div></div>
+      <div class="hint" id="ptexto"></div>
+    </div>
+
+    <div class="result" id="result">
+      <audio id="player" controls></audio>
+      <a class="download" id="descargar" href="#">Descargar audio</a>
+    </div>
+  </section>
+
+  <section class="panel">
+    <details id="dicBox">
+      <summary>Diccionario de pronunciación</summary>
+      <p class="hint" style="margin-top:0">Una regla por línea con el formato <code>palabra = cómo se lee</code>. Se reemplaza la palabra completa, respetando mayúsculas. Es compartido para todos los usuarios del servidor.</p>
+      <textarea class="dic" id="dic" spellcheck="false"></textarea>
+      <div class="actions" style="margin-top:12px">
+        <button class="ghost" type="button" id="guardarDic">Guardar diccionario</button>
+        <span class="status" id="dicStatus"></span>
+      </div>
+    </details>
+  </section>
+
+  <section class="panel">
+    <details id="clonBox">
+      <summary>Clonar mi voz</summary>
+      <ol class="pasos">
+        <li><strong>Lee en voz alta uno de estos textos</strong> y grábalo con el celular o la computadora (unos 12-15 s).</li>
+        <li><strong>Sube la grabación</strong> aquí abajo. Sirven WAV, MP3, M4A (notas de voz), OGG o WebM.</li>
+        <li>Revisa que la <strong>transcripción</strong> diga exactamente lo que dijiste, ponle un nombre y pulsa <strong>Crear voz</strong>.</li>
+      </ol>
+
+      <label for="textoSug">Texto para leer</label>
+      <select id="textoSug"></select>
+      <blockquote class="sugerido" id="textoSugVal"></blockquote>
+      <div class="chips"><button class="ghost" type="button" id="copiarSug">Copiar texto</button></div>
+      <p class="hint">Consejos: lugar silencioso, sin música ni eco; habla con tu tono y velocidad normales (el clon imita cómo lees); mantén el micrófono a un palmo de distancia y sin tocarlo.</p>
+
+      <div class="grid2 mt">
+        <div>
+          <label for="clonArchivo">Grabación</label>
+          <input type="file" id="clonArchivo" accept="audio/*,.m4a,.wav,.mp3,.ogg,.webm,.flac">
+          <div class="hint" id="clonInfo"></div>
+          <audio id="clonPrev" controls style="display:none;margin-top:8px"></audio>
+        </div>
+        <div>
+          <label for="clonNombre">Nombre de la voz</label>
+          <input type="text" id="clonNombre" placeholder="ej. david" maxlength="40" autocomplete="off">
+          <div class="hint">Minúsculas, números, _ o -. Aparecerá como <code>clon_nombre</code>.</div>
+        </div>
+      </div>
+      <label for="clonTexto" class="mt">Transcripción exacta de la grabación</label>
+      <textarea class="small" id="clonTexto"></textarea>
+      <div class="chips"><button class="ghost" type="button" id="usarSug">Usar el texto sugerido</button></div>
+      <label class="check mt"><input type="checkbox" id="clonReemplazar"> Reemplazar si ya existe una voz con ese nombre</label>
+      <div class="actions">
+        <button type="button" id="crearClon">Crear voz</button>
+        <span class="status" id="clonStatus" role="status"></span>
+      </div>
+
+      <h2 class="mt">Voces clonadas</h2>
+      <ul class="hist" id="clones"></ul>
+      <p class="hint" id="clonesVacio">Todavía no hay voces clonadas.</p>
+      <p class="hint">Clona solo tu voz o la de personas que te hayan dado permiso. Las voces clonadas usan la GPU (Qwen3-TTS) y no admiten "Estilo" ni velocidad.</p>
+    </details>
+  </section>
+
+  <section class="panel">
+    <div class="bar" style="margin:0 0 12px">
+      <h2 style="margin:0">Historial</h2>
+      <button class="linkbtn" type="button" id="borrarHist">Borrar historial</button>
+    </div>
+    <ul class="hist" id="hist"></ul>
+    <p class="hint" id="histVacio">Aún no hay audios. Se guardan los últimos 20, solo en este navegador.</p>
+  </section>
+
+  <section class="panel">
+    <details id="claveBox">
+      <summary>Clave de API</summary>
+      <label for="clave">Clave (sk-tts-…)</label>
+      <input type="password" id="clave" autocomplete="off" placeholder="Pega aquí la clave del servidor de voz">
+      <div class="hint">Se guarda solo en este navegador. Está en <code>~/tts/tts.env</code> del servidor.</div>
+    </details>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+const HINTS = {
+  kokoro: "Kokoro · CPU, rápido y natural.",
+  piper: "Piper · CPU, el más rápido, acento mexicano.",
+  qwen: "Qwen3-TTS · GPU, más expresivo; más lento y puede fallar si la GPU está ocupada.",
+};
+const ESTILOS = {
+  "Alegre": "Habla con tono alegre y entusiasta.",
+  "Noticiero": "Habla como locutor de noticias, con voz clara, seria y profesional.",
+  "Calmado": "Habla despacio, con voz tranquila y relajada.",
+  "Susurro": "Habla en voz muy baja, casi susurrando.",
+  "Triste": "Habla con tono triste y melancólico.",
+  "Enojado": "Habla con tono molesto y enojado.",
+};
+const motor = (id) => id.startsWith("es_MX") ? "piper" : /^e[fm]_/.test(id) ? "kokoro" : "qwen";
+const fmt = { s: (v) => `${Number(v).toFixed(2)} s`, n: (v) => Number(v).toFixed(2) };
+let urlActual = null;
+
+// --- Controles con valor visible -----------------------------------------------------------
+function enlazar(id, f) {
+  const el = $(id), out = $(id + "Val");
+  const upd = () => { out.textContent = f(el.value); };
+  el.addEventListener("input", upd); upd();
+}
+enlazar("pOracion", fmt.s); enlazar("pFrase", fmt.s); enlazar("pParrafo", fmt.s);
+enlazar("expresividad", fmt.n); enlazar("ritmo", fmt.n); enlazar("variacion", fmt.n);
+$("velocidad").addEventListener("input", () => { $("velVal").textContent = `${Number($("velocidad").value).toFixed(1)}×`; });
+$("volumen").addEventListener("input", () => { $("volVal").textContent = `${Math.round($("volumen").value * 100)} %`; });
+let qwenMax = 3000;
+fetch("v1/config").then((r) => r.json()).then((c) => { qwenMax = c.qwen_max_chars; contar(); }).catch(() => {});
+function contar() {
+  const n = $("texto").value.replace(/\[\s*pausa[^\]]*\]/gi, "").length, el = $("count");
+  const qwenVoz = $("voz").value && motor($("voz").value) === "qwen";
+  const min = Math.max(1, Math.round(n / 1000));
+  el.textContent = `${n.toLocaleString("es-MX")} caracteres` + (n > 300 ? ` · ~${min} min de audio` : "") +
+    (qwenVoz ? ` · máx. ${qwenMax.toLocaleString("es-MX")} con Qwen` : "");
+  el.classList.toggle("error", qwenVoz && n > qwenMax);
+}
+$("texto").addEventListener("input", contar);
+$("resetPiper").addEventListener("click", () => {
+  $("expresividad").value = 0.667; $("ritmo").value = 0.8;
+  ["expresividad", "ritmo"].forEach((id) => $(id).dispatchEvent(new Event("input")));
+});
+$("insPausa").addEventListener("click", () => {
+  const t = $("texto"), i = t.selectionStart ?? t.value.length;
+  t.value = t.value.slice(0, i) + " [pausa 1s] " + t.value.slice(t.selectionEnd ?? i);
+  t.focus(); t.selectionStart = t.selectionEnd = i + 12;
+  t.dispatchEvent(new Event("input"));
+});
+for (const [nombre, texto] of Object.entries(ESTILOS)) {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "ghost"; b.textContent = nombre;
+  b.addEventListener("click", () => { $("estilo").value = texto; });
+  $("chips").appendChild(b);
+}
+
+// --- Voz y ajustes por motor -----------------------------------------------------------------
+function mostrarAjustes() {
+  const v = $("voz").value, m = motor(v);
+  $("vozHint").textContent = HINTS[m];
+  for (const e of ["kokoro", "piper", "qwen"]) $("cfg-" + e).classList.toggle("show", e === m);
+  $("estiloBox").style.display = v.startsWith("clon_") ? "none" : "";
+  $("velocidad").disabled = m === "qwen";
+  $("velHint").textContent = m === "qwen" ? "Qwen3-TTS no permite cambiar la velocidad." : "";
+  store.set("tts_voz", v);
+  if (typeof contar === "function") contar();
+}
+$("voz").addEventListener("change", mostrarAjustes);
+
+async function recargarVoces(seleccionar) {
+  const { voices } = await fetch("v1/audio/voices").then((r) => r.json());
+  $("voz").innerHTML = "";
+  const grupos = { kokoro: "Kokoro (CPU)", piper: "Piper es-MX (CPU)", qwen: "Qwen3-TTS (GPU)" };
+  for (const [m, nombre] of Object.entries(grupos)) {
+    const og = document.createElement("optgroup"); og.label = nombre;
+    for (const v of voices.filter((v) => motor(v.id) === m)) {
+      const o = document.createElement("option"); o.value = v.id; o.textContent = v.name.split("· ")[1] || v.name;
+      og.appendChild(o);
+    }
+    if (og.children.length) $("voz").appendChild(og);
+  }
+  const elegida = seleccionar || store.get("tts_voz");
+  if (elegida && voices.some((v) => v.id === elegida)) $("voz").value = elegida;
+  mostrarAjustes();
+}
+recargarVoces();
+
+// --- Clave -----------------------------------------------------------------------------------
+$("clave").value = store.get("tts_clave") || "";
+if (!$("clave").value) $("claveBox").open = true;
+$("clave").addEventListener("change", () => store.set("tts_clave", $("clave").value.trim()));
+function clave() {
+  const k = $("clave").value.trim();
+  if (!k) { $("claveBox").open = true; $("clave").focus(); }
+  return k;
+}
+
+// --- Diccionario -----------------------------------------------------------------------------
+function cargarDic() {
+  fetch("v1/pronunciacion").then((r) => r.json()).then((d) => {
+    $("dic").value = Object.entries(d).map(([k, v]) => `${k} = ${v}`).join("\n");
+  });
+}
+cargarDic();
+$("guardarDic").addEventListener("click", async () => {
+  const st = $("dicStatus"); st.classList.remove("error");
+  const k = clave();
+  if (!k) { st.textContent = "Falta la clave de API."; st.classList.add("error"); return; }
+  const dic = {}, malas = [];
+  $("dic").value.split("\n").forEach((l, i) => {
+    if (!l.trim()) return;
+    const j = l.indexOf("=");
+    if (j < 1 || !l.slice(j + 1).trim()) malas.push(i + 1); else dic[l.slice(0, j).trim()] = l.slice(j + 1).trim();
+  });
+  if (malas.length) { st.textContent = `Revisa las líneas ${malas.join(", ")} (formato: palabra = lectura).`; st.classList.add("error"); return; }
+  try {
+    const r = await fetch("v1/pronunciacion", { method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${k}` }, body: JSON.stringify(dic) });
+    if (!r.ok) throw new Error(r.status === 401 ? "Clave de API incorrecta." : `Error ${r.status}`);
+    st.textContent = `Guardado (${Object.keys(dic).length} reglas).`; cargarDic();
+  } catch (e) { st.textContent = e.message; st.classList.add("error"); }
+});
+
+// --- Historial (IndexedDB, solo este navegador) ------------------------------------------------
+const MAX_HIST = 20;
+const db = new Promise((ok) => {
+  try {
+    const req = indexedDB.open("tts", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("audios", { keyPath: "id" });
+    req.onsuccess = () => ok(req.result);
+    req.onerror = () => ok(null);
+  } catch { ok(null); }
+});
+async function tx(modo, fn) {
+  const d = await db; if (!d) return null;
+  return new Promise((ok) => {
+    try {
+      const t = d.transaction("audios", modo), s = t.objectStore("audios"), r = fn(s);
+      t.oncomplete = () => ok(r && r.result); t.onerror = () => ok(null);
+    } catch { ok(null); }
+  });
+}
+const urlsHist = [];
+async function pintarHist() {
+  urlsHist.splice(0).forEach((u) => URL.revokeObjectURL(u));
+  const items = ((await tx("readonly", (s) => s.getAll())) || []).sort((a, b) => b.id - a.id);
+  $("hist").innerHTML = "";
+  $("histVacio").style.display = items.length ? "none" : "";
+  for (const it of items) {
+    const u = URL.createObjectURL(it.blob); urlsHist.push(u);
+    const li = document.createElement("li");
+    li.innerHTML = `<div class="txt"></div><div class="meta"></div><div class="row"><audio controls preload="none"></audio><a class="download" download>Descargar</a><button class="linkbtn" type="button">Quitar</button></div>`;
+    li.querySelector(".txt").textContent = it.texto;
+    li.querySelector(".meta").textContent = `${new Date(it.id).toLocaleString("es-MX")} · ${it.vozNombre} · ${it.formato.toUpperCase()} · ${(it.blob.size / 1024).toFixed(0)} KB`;
+    li.querySelector("audio").src = u;
+    const a = li.querySelector("a"); a.href = u; a.download = it.archivo;
+    li.querySelector("button").addEventListener("click", async () => { await tx("readwrite", (s) => s.delete(it.id)); pintarHist(); });
+    $("hist").appendChild(li);
+  }
+}
+async function guardarHist(item) {
+  await tx("readwrite", (s) => s.put(item));
+  const ids = (((await tx("readonly", (s) => s.getAllKeys())) || [])).sort((a, b) => b - a);
+  for (const id of ids.slice(MAX_HIST)) await tx("readwrite", (s) => s.delete(id));
+  pintarHist();
+}
+$("borrarHist").addEventListener("click", async () => {
+  if (!confirm("¿Borrar todo el historial de este navegador?")) return;
+  await tx("readwrite", (s) => s.clear()); pintarHist();
+});
+pintarHist();
+
+// --- Clonar voz ----------------------------------------------------------------------------------
+const TEXTOS_CLON = {
+  "Cotidiano": "Hola, ¿cómo están? Hoy les comparto una buena noticia: mañana empezamos a trabajar en el nuevo parque del barrio. Queremos escuchar sus ideas, así que los esperamos a las seis de la tarde, junto a la calle principal.",
+  "Profesional": "Buenos días a todos. En esta reunión vamos a revisar los avances del proyecto, los resultados de la encuesta y los próximos pasos. Les pido que tengan a la mano sus comentarios; al final abriremos un espacio para preguntas.",
+  "Narración": "Aquella mañana el cielo de Juárez amaneció despejado. Doña Rosa abrió su tienda temprano, saludó a los vecinos y, mientras el café se enfriaba sobre el mostrador, pensó que sería un día tranquilo. No imaginaba la sorpresa que llegaría después.",
+};
+for (const k of Object.keys(TEXTOS_CLON)) {
+  const o = document.createElement("option"); o.value = k; o.textContent = k; $("textoSug").appendChild(o);
+}
+const mostrarSug = () => { $("textoSugVal").textContent = TEXTOS_CLON[$("textoSug").value]; };
+$("textoSug").addEventListener("change", mostrarSug); mostrarSug();
+$("copiarSug").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(TEXTOS_CLON[$("textoSug").value]); $("copiarSug").textContent = "Copiado ✓"; }
+  catch { getSelection().selectAllChildren($("textoSugVal")); $("copiarSug").textContent = "Selecciónalo y cópialo"; }
+  setTimeout(() => { $("copiarSug").textContent = "Copiar texto"; }, 2000);
+});
+$("usarSug").addEventListener("click", () => { $("clonTexto").value = TEXTOS_CLON[$("textoSug").value]; });
+
+// Convierte cualquier audio que el navegador sepa abrir a WAV mono 24 kHz, 16 bits
+let clonWav = null, clonPrevUrl = null;
+async function aWav(file) {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  let buf;
+  try { buf = await ctx.decodeAudioData(await file.arrayBuffer()); } finally { ctx.close(); }
+  const sr = 24000, n = Math.ceil(buf.duration * sr);
+  const off = new OfflineAudioContext(1, n, sr);
+  const src = off.createBufferSource(); src.buffer = buf; src.connect(off.destination); src.start();
+  const datos = (await off.startRendering()).getChannelData(0);
+  const out = new DataView(new ArrayBuffer(44 + datos.length * 2));
+  const w = (o, s) => [...s].forEach((c, i) => out.setUint8(o + i, c.charCodeAt(0)));
+  w(0, "RIFF"); out.setUint32(4, 36 + datos.length * 2, true); w(8, "WAVEfmt "); out.setUint32(16, 16, true);
+  out.setUint16(20, 1, true); out.setUint16(22, 1, true); out.setUint32(24, sr, true); out.setUint32(28, sr * 2, true);
+  out.setUint16(32, 2, true); out.setUint16(34, 16, true); w(36, "data"); out.setUint32(40, datos.length * 2, true);
+  for (let i = 0; i < datos.length; i++) out.setInt16(44 + i * 2, Math.max(-1, Math.min(1, datos[i])) * 0x7fff, true);
+  return { blob: new Blob([out.buffer], { type: "audio/wav" }), duracion: buf.duration };
+}
+$("clonArchivo").addEventListener("change", async () => {
+  const f = $("clonArchivo").files[0], info = $("clonInfo");
+  clonWav = null; info.classList.remove("error"); $("clonPrev").style.display = "none";
+  if (!f) { info.textContent = ""; return; }
+  if (!$("clonNombre").value) $("clonNombre").value = f.name.replace(/\.[^.]+$/, "").toLowerCase().normalize("NFD")
+    .replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9_-]+/g, "_").replace(/^_|_$/g, "").slice(0, 40);
+  info.textContent = "Leyendo la grabación…";
+  try {
+    clonWav = await aWav(f);
+    const d = clonWav.duracion;
+    info.textContent = `Duración: ${d.toFixed(1)} s` + (d < 3 || d > 30 ? " — debe durar entre 3 y 30 s." : d < 8 ? " — funciona, pero 10-15 s da mejor resultado." : " ✓");
+    if (d < 3 || d > 30) info.classList.add("error");
+    if (clonPrevUrl) URL.revokeObjectURL(clonPrevUrl);
+    clonPrevUrl = URL.createObjectURL(f); $("clonPrev").src = clonPrevUrl; $("clonPrev").style.display = "";
+  } catch {
+    info.textContent = "Este navegador no pudo abrir el archivo. Prueba con WAV o MP3."; info.classList.add("error");
+  }
+});
+function b64(blob) {
+  return new Promise((ok, err) => { const r = new FileReader(); r.onload = () => ok(r.result.split(",")[1]); r.onerror = err; r.readAsDataURL(blob); });
+}
+$("crearClon").addEventListener("click", async () => {
+  const st = $("clonStatus"); st.classList.remove("error");
+  const fallo = (m) => { st.textContent = m; st.classList.add("error"); };
+  const nombre = $("clonNombre").value.trim().toLowerCase(), texto = $("clonTexto").value.trim();
+  if (!clonWav) return fallo("Primero sube una grabación.");
+  if (clonWav.duracion < 3 || clonWav.duracion > 30) return fallo("La grabación debe durar entre 3 y 30 s.");
+  if (!/^[a-z0-9_-]{1,40}$/.test(nombre)) return fallo("Nombre inválido: usa minúsculas, números, _ o -.");
+  if (texto.length < 10) return fallo("Escribe la transcripción de la grabación.");
+  const k = clave(); if (!k) return fallo("Falta la clave de API.");
+  $("crearClon").disabled = true; st.textContent = "Subiendo…";
+  try {
+    const r = await fetch("v1/voces", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${k}` },
+      body: JSON.stringify({ nombre, transcripcion: texto, audio_wav_base64: await b64(clonWav.blob), reemplazar: $("clonReemplazar").checked }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(r.status === 401 ? "Clave de API incorrecta." : typeof d.detail === "string" ? d.detail : `Error ${r.status}`);
+    st.textContent = `Voz ${d.id} creada. Ya está seleccionada arriba: escribe un texto y pulsa Generar audio.`;
+    await recargarVoces(d.id); pintarClones();
+  } catch (e) { fallo(e.message); } finally { $("crearClon").disabled = false; }
+});
+async function pintarClones() {
+  const { voces } = await fetch("v1/voces").then((r) => r.json()).catch(() => ({ voces: [] }));
+  $("clones").innerHTML = ""; $("clonesVacio").style.display = voces.length ? "none" : "";
+  for (const v of voces) {
+    const li = document.createElement("li");
+    li.innerHTML = `<div class="row"><span class="txt"></span><button class="linkbtn" type="button">Borrar</button></div>`;
+    li.querySelector(".txt").textContent = v.id;
+    li.querySelector("button").addEventListener("click", async () => {
+      if (!confirm(`¿Borrar la voz ${v.id}? Se eliminan su grabación y su transcripción del servidor.`)) return;
+      const k = clave(); if (!k) return;
+      const r = await fetch(`v1/voces/${encodeURIComponent(v.nombre)}`, { method: "DELETE", headers: { Authorization: `Bearer ${k}` } });
+      if (!r.ok) { alert(r.status === 401 ? "Clave de API incorrecta." : `No se pudo borrar (error ${r.status}).`); return; }
+      await recargarVoces(); pintarClones();
+    });
+    $("clones").appendChild(li);
+  }
+}
+pintarClones();
+
+// --- Generar -----------------------------------------------------------------------------------
+$("generar").addEventListener("click", async () => {
+  const texto = $("texto").value.trim();
+  const st = $("status");
+  st.classList.remove("error");
+  if (!texto) { st.textContent = "Escribe un texto primero."; st.classList.add("error"); return; }
+  const k = clave();
+  if (!k) { st.textContent = "Falta la clave de API."; st.classList.add("error"); return; }
+  store.set("tts_clave", k);
+
+  const voz = $("voz").value, m = motor(voz), formato = $("formato").value;
+  const body = { input: texto, voice: voz, response_format: formato, volume: Number($("volumen").value),
+                 pronunciation: $("usarDic").checked, speed: Number($("velocidad").value),
+                 paragraph_pause: Number($("pParrafo").value) };
+  if (m === "kokoro") Object.assign(body, { sentence_pause: Number($("pOracion").value), clause_pause: Number($("pFrase").value) });
+  if (m === "piper") Object.assign(body, { expressiveness: Number($("expresividad").value), rhythm: Number($("ritmo").value) });
+  if (m === "qwen") Object.assign(body, { language: $("idioma").value, temperature: Number($("variacion").value),
+                                           instructions: voz.startsWith("clon_") ? "" : $("estilo").value.trim() });
+
+  $("generar").disabled = true;
+  const t0 = performance.now();
+  const H = { "Content-Type": "application/json", Authorization: `Bearer ${k}` };
+  const error = async (r) => {
+    const det = (await r.json().catch(() => ({}))).detail;
+    return new Error(r.status === 401 ? "Clave de API incorrecta." : typeof det === "string" ? det : `Error ${r.status}`);
+  };
+  const barra = (frac, txt) => { $("progreso").hidden = false; $("pfill").style.width = `${Math.round(frac * 100)}%`; $("ptexto").textContent = txt; };
+  st.textContent = m === "qwen" ? "Generando en la GPU…" : "Generando…";
+  barra(0, "Preparando…");
+  try {
+    let r = await fetch("v1/trabajos", { method: "POST", headers: H, body: JSON.stringify(body) });
+    if (!r.ok) throw await error(r);
+    let t = await r.json();
+    trabajoActual = t.id; $("cancelar").style.display = "";
+    while (t.estado === "en_cola" || t.estado === "procesando") {
+      await new Promise((ok) => setTimeout(ok, 1000));
+      r = await fetch(`v1/trabajos/${t.id}`, { headers: H });
+      if (!r.ok) throw await error(r);
+      t = await r.json();
+      const resto = t.hecho ? (t.transcurrido / t.hecho) * (t.total - t.hecho) : null;
+      barra(t.hecho / t.total, `Bloque ${t.hecho} de ${t.total} · ${fmtDur(t.segundos_audio)} de audio generado` +
+        (resto != null && t.hecho < t.total ? ` · faltan ~${fmtDur(resto)}` : ""));
+    }
+    if (t.estado === "cancelado") { st.textContent = "Cancelado."; return; }
+    if (t.estado === "error") throw new Error(`Falló la generación: ${t.error}`);
+    barra(1, `Listo: ${fmtDur(t.segundos_audio)} de audio. Descargando…`);
+    r = await fetch(`v1/trabajos/${t.id}/audio`, { headers: H });
+    if (!r.ok) throw await error(r);
+    const blob = await r.blob();
+    $("ptexto").textContent = `${fmtDur(t.segundos_audio)} de audio en ${t.total} bloques.`;
+    if (urlActual) URL.revokeObjectURL(urlActual);
+    urlActual = URL.createObjectURL(blob);
+    $("player").src = urlActual;
+    const base = texto.replace(/\[[^\]]*\]/g, " ").slice(0, 40).normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_|_$/g, "") || "audio";
+    const archivo = `${base}_${voz}.${formato}`;
+    $("descargar").href = urlActual; $("descargar").download = archivo;
+    $("descargar").textContent = `Descargar ${formato.toUpperCase()} (${(blob.size / 1024).toFixed(0)} KB)`;
+    $("result").classList.add("show");
+    st.textContent = `Listo en ${((performance.now() - t0) / 1000).toFixed(1)} s.`;
+    guardarHist({ id: Date.now(), texto, vozNombre: $("voz").selectedOptions[0].textContent, formato, archivo, blob });
+  } catch (e) {
+    st.textContent = e.message || "No se pudo generar el audio.";
+    st.classList.add("error");
+    $("progreso").hidden = true;
+  } finally {
+    $("generar").disabled = false;
+    $("cancelar").style.display = "none"; $("cancelar").disabled = false;
+    trabajoActual = null;
+  }
+});
+
+let trabajoActual = null;
+function fmtDur(s) {
+  s = Math.max(0, Math.round(s));
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
+}
+$("cancelar").addEventListener("click", async () => {
+  if (!trabajoActual) return;
+  $("cancelar").disabled = true; $("status").textContent = "Cancelando… (termina el bloque actual)";
+  await fetch(`v1/trabajos/${trabajoActual}`, { method: "DELETE", headers: { Authorization: `Bearer ${clave()}` } }).catch(() => {});
+});
+</script>
+</body>
+</html>

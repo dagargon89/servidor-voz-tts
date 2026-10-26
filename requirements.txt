@@ -1,0 +1,13 @@
+# Python 3.12. PyTorch con CUDA 13.0:
+#   uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu130
+torch==2.14.1
+torchaudio==2.11.0
+qwen-tts==0.1.1
+kokoro-onnx==0.6.1
+piper-tts==1.8.0
+fastapi==0.162.0
+uvicorn==0.54.0
+soundfile==0.14.0
+numpy==2.5.4
+onnxruntime==1.31.0
+huggingface-hub==0.36.2

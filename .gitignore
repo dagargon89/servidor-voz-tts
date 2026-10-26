@@ -1,0 +1,13 @@
+# Secretos: clave de API (ver tts.env.example)
+tts.env
+
+# Voces clonadas: grabaciones personales
+voces/*
+!voces/.gitkeep
+
+# Pesados o regenerables
+.venv/
+models/
+muestras/
+__pycache__/
+*.pyc
