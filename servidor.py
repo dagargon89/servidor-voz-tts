@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import tempfile
 import threading
 import time
 import uuid
@@ -19,7 +20,8 @@ import wave
 
 import numpy as np
 import soundfile as sf
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
@@ -28,6 +30,7 @@ M = os.path.join(BASE, "models")
 VOCES_CLON = os.path.join(BASE, "voces")
 API_KEY = os.environ.get("TTS_API_KEY", "")
 QWEN_IDLE_SECONDS = int(os.environ.get("QWEN_IDLE_SECONDS", "300"))
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
 
 KOKORO_VOCES = {"ef_dora": "Kokoro · Dora (mujer, es)", "em_alex": "Kokoro · Alex (hombre, es)",
                 "em_santa": "Kokoro · Santa (hombre, es)"}
@@ -108,9 +111,20 @@ class Qwen:
 
     def __init__(self):
         self.modelos = {}
+        self.prompts = {}  # (nombre, mtime del wav, mtime del txt) -> prompt de clonación ya codificado
         self.ultimo_uso = 0.0
         self.lock = threading.Lock()
         threading.Thread(target=self._vigilar, daemon=True).start()
+
+    def _prompt_clon(self, nombre):
+        """Codifica la grabación de referencia una sola vez por voz (se recalcula si cambian los archivos)."""
+        wav, txt = os.path.join(VOCES_CLON, f"{nombre}.wav"), os.path.join(VOCES_CLON, f"{nombre}.txt")
+        clave = (nombre, os.path.getmtime(wav), os.path.getmtime(txt))
+        if clave not in self.prompts:
+            ref_txt = open(txt, encoding="utf-8").read().strip()
+            self.prompts = {k: v for k, v in self.prompts.items() if k[0] != nombre}
+            self.prompts[clave] = self._modelo("Base").create_voice_clone_prompt(ref_audio=wav, ref_text=ref_txt)
+        return self.prompts[clave]
 
     def _modelo(self, variante):
         if variante not in self.modelos:
@@ -127,6 +141,7 @@ class Qwen:
         if self.modelos:
             import torch
             self.modelos.clear()
+            self.prompts.clear()  # viven en la GPU junto con el modelo
             gc.collect()
             torch.cuda.empty_cache()
 
@@ -143,11 +158,9 @@ class Qwen:
         with self.lock:
             try:
                 if voz.startswith("clon_"):
-                    nombre = voz[len("clon_"):]
-                    ref_txt = open(os.path.join(VOCES_CLON, f"{nombre}.txt"), encoding="utf-8").read().strip()
+                    prompt = self._prompt_clon(voz[len("clon_"):])
                     wavs, sr = self._modelo("Base").generate_voice_clone(
-                        text=texto, language=lang, ref_audio=os.path.join(VOCES_CLON, f"{nombre}.wav"),
-                        ref_text=ref_txt, **muestreo)
+                        text=texto, language=lang, voice_clone_prompt=prompt, **muestreo)
                 else:
                     wavs, sr = self._modelo("CustomVoice").generate_custom_voice(
                         text=texto, speaker=voz, language=lang, instruct=p.instructions or None, **muestreo)
@@ -156,7 +169,29 @@ class Qwen:
         return wavs[0], sr
 
 
-kokoro, piper, qwen = Kokoro(), Piper(), Qwen()
+class Whisper:
+    """Voz a texto en CPU (int8), para no competir por la GPU con el LLM y Qwen3-TTS. Se precarga al arrancar."""
+
+    def __init__(self):
+        self.modelo = None
+        self.lock = threading.Lock()
+
+    def cargar(self):
+        with self.lock:
+            if self.modelo is None:
+                from faster_whisper import WhisperModel
+                self.modelo = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+
+    def transcribir(self, ruta, idioma):
+        self.cargar()
+        with self.lock:
+            segs, info = self.modelo.transcribe(ruta, language=idioma or None, beam_size=1, vad_filter=True)
+            return " ".join(s.text.strip() for s in segs).strip(), info
+
+
+kokoro, piper, qwen, whisper = Kokoro(), Piper(), Qwen(), Whisper()
+# Precarga Whisper en segundo plano (~20 s en CPU) para que la primera transcripción no espere
+threading.Thread(target=whisper.cargar, daemon=True).start()
 
 
 def voces_clon():
@@ -391,6 +426,28 @@ def cancelar_trabajo(id_: str):
     t = trabajo(id_)
     t.cancelar = True
     return t.resumen()
+
+
+@app.post("/v1/audio/transcriptions", dependencies=[Depends(requiere_clave)])
+async def transcriptions(file: UploadFile, model: str = Form("whisper-1"), language: str = Form("es"),
+                         response_format: str = Form("json")):
+    """Voz a texto compatible con OpenAI. Acepta cualquier formato que lea PyAV (webm, ogg, mp3, m4a, wav...)."""
+    datos = await file.read()
+    if not datos:
+        raise HTTPException(400, "Archivo de audio vacío")
+    if len(datos) > 25 * 1024 * 1024:
+        raise HTTPException(413, "El audio supera 25 MB")
+    sufijo = os.path.splitext(file.filename or "")[1] or ".webm"
+    with tempfile.NamedTemporaryFile(suffix=sufijo) as tmp:
+        tmp.write(datos)
+        tmp.flush()
+        try:
+            texto, info = await run_in_threadpool(whisper.transcribir, tmp.name, language)
+        except Exception as e:
+            raise HTTPException(400, f"No se pudo leer el audio: {e}")
+    if response_format == "text":
+        return Response(texto, media_type="text/plain; charset=utf-8")
+    return {"text": texto, "language": info.language, "duration": round(info.duration, 2)}
 
 
 @app.get("/v1/config")
