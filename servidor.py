@@ -33,7 +33,8 @@ QWEN_IDLE_SECONDS = int(os.environ.get("QWEN_IDLE_SECONDS", "300"))
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
 
 KOKORO_VOCES = {"ef_dora": "Kokoro · Dora (mujer, es)", "em_alex": "Kokoro · Alex (hombre, es)",
-                "em_santa": "Kokoro · Santa (hombre, es)"}
+                "em_santa": "Kokoro · Santa (hombre, es)",
+                "af_heart": "Kokoro · Heart (mujer, en)", "am_adam": "Kokoro · Adam (hombre, en)"}
 PIPER_VOCES = {"es_MX-claude-high": "Piper · Claude (mujer, es-MX)", "es_MX-ald-medium": "Piper · Ald (hombre, es-MX)"}
 QWEN_VOCES = {s: f"Qwen3 · {s.capitalize()}" for s in
               ["serena", "vivian", "ryan", "aiden", "dylan", "eric", "uncle_fu", "ono_anna", "sohee"]}
@@ -185,7 +186,9 @@ class Whisper:
     def transcribir(self, ruta, idioma):
         self.cargar()
         with self.lock:
-            segs, info = self.modelo.transcribe(ruta, language=idioma or None, beam_size=1, vad_filter=True)
+            # "auto" o vacío: Whisper detecta el idioma
+            idioma = None if (idioma or "auto").strip().lower() == "auto" else idioma.strip().lower()
+            segs, info = self.modelo.transcribe(ruta, language=idioma, beam_size=1, vad_filter=True)
             return " ".join(s.text.strip() for s in segs).strip(), info
 
 
@@ -429,9 +432,12 @@ def cancelar_trabajo(id_: str):
 
 
 @app.post("/v1/audio/transcriptions", dependencies=[Depends(requiere_clave)])
-async def transcriptions(file: UploadFile, model: str = Form("whisper-1"), language: str = Form("es"),
+async def transcriptions(request: Request, file: UploadFile, model: str = Form("whisper-1"), language: str | None = Form(None),
                          response_format: str = Form("json")):
     """Voz a texto compatible con OpenAI. Acepta cualquier formato que lea PyAV (webm, ogg, mp3, m4a, wav...)."""
+    # Sin el campo: español, como siempre. Vacío o "auto": se detecta (FastAPI no distingue vacío de ausente)
+    if "language" not in await request.form():
+        language = "es"
     datos = await file.read()
     if not datos:
         raise HTTPException(400, "Archivo de audio vacío")
@@ -447,7 +453,8 @@ async def transcriptions(file: UploadFile, model: str = Form("whisper-1"), langu
             raise HTTPException(400, f"No se pudo leer el audio: {e}")
     if response_format == "text":
         return Response(texto, media_type="text/plain; charset=utf-8")
-    return {"text": texto, "language": info.language, "duration": round(info.duration, 2)}
+    return {"text": texto, "language": info.language, "language_probability": round(info.language_probability, 3),
+            "duration": round(info.duration, 2)}
 
 
 @app.get("/v1/config")
