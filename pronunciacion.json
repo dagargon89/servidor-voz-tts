@@ -1,4 +1,11 @@
 {
   "IA": "inteligencia artificial",
-  "TTS": "texto a voz"
+  "TTS": "texto a voz",
+  "656 123 4567": "seis cinco seis, uno dos tres, cuatro cinco seis siete",
+  "656-123-4567": "seis cinco seis, uno dos tres, cuatro cinco seis siete",
+  "bienvenidos2026": "bienvenidos dos mil veintiséis",
+  "123": "ciento veintitrés",
+  "ana.lopez@example.com": "ana punto lópez arroba example punto com",
+  "carlos.ramirez@example.com": "carlos punto ramírez arroba example punto com",
+  "laura.mendez@example.com": "laura punto méndez arroba example punto com"
 }
